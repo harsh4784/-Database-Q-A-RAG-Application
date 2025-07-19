@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-import mysql.connector
 from langchain_openai import OpenAI
 from langchain_community.utilities import SQLDatabase
 from langchain.chains import create_sql_query_chain
@@ -12,6 +11,13 @@ from operator import itemgetter
 
 # Load environment variables
 load_dotenv()
+
+# Check for required environment variables
+required_vars = ['DB_USER', 'DB_PASSWORD', 'DB_NAME', 'OPENAI_API_KEY']
+missing_vars = [var for var in required_vars if not os.getenv(var)]
+if missing_vars:
+    st.error(f"Missing environment variables: {', '.join(missing_vars)}. Please check your .env file.")
+    st.stop()
 
 # Database connection
 @st.cache_resource
@@ -58,9 +64,12 @@ Answer: """
     
     return chain
 
+# Initialize the chain once (cached)
+chain = init_chain()
+
 # Streamlit app
 st.title("Database Q&A Assistant")
-st.write("Ask questions about your database:")
+st.write("Ask questions about your database (e.g., 'How many users are there?'):")
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -73,6 +82,10 @@ for message in st.session_state.messages:
 
 # User input
 if prompt := st.chat_input("Enter your question:"):
+    if not prompt.strip():
+        st.warning("Please enter a valid question.")
+        st.stop()  # Prevent further processing
+    
     # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -80,16 +93,20 @@ if prompt := st.chat_input("Enter your question:"):
     
     # Get response
     try:
-        chain = init_chain()
         with st.chat_message("assistant"):
             with st.spinner("Processing..."):
-                response = chain.invoke({"question": prompt})
-                st.markdown(response)
+                full_response = chain.invoke({"question": prompt})
+                # Parse to extract only the answer (assuming it starts after "Answer: ")
+                if "Answer: " in full_response:
+                    answer = full_response.split("Answer: ", 1)[-1].strip()
+                else:
+                    answer = full_response  # Fallback if parsing fails
+                st.markdown(answer)
         
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.messages.append({"role": "assistant", "content": answer})
     
     except Exception as e:
-        error_msg = f"Error: {str(e)}"
+        error_msg = f"An error occurred: {str(e)}. Please try again or check your setup."
         with st.chat_message("assistant"):
             st.error(error_msg)
         st.session_state.messages.append({"role": "assistant", "content": error_msg})
